@@ -84,15 +84,15 @@ describe("product API", () => {
 
     const defaultOrder = await request(app).get("/api/products").expect(200);
     expect(defaultOrder.body.query).toEqual({ q: "" });
-    expect(defaultOrder.body.items.map((product: { id: string }) => product.id)).toEqual([
-      "aurora-desk-lamp",
-      "cloudrest-throw",
-      "trailmark-bottle",
-      "tideline-picnic-blanket",
-      "nesting-prep-bowls",
-      "emberline-kettle",
-      "papertrail-notebook-set",
-      "harbor-catchall-tray",
+    expect(defaultOrder.body.items).toMatchObject([
+      { id: "aurora-desk-lamp" },
+      { id: "cloudrest-throw" },
+      { id: "trailmark-bottle" },
+      { id: "tideline-picnic-blanket" },
+      { id: "nesting-prep-bowls" },
+      { id: "emberline-kettle" },
+      { id: "papertrail-notebook-set" },
+      { id: "harbor-catchall-tray" },
     ]);
   });
 
@@ -148,22 +148,23 @@ describe("product API", () => {
     });
   });
 
-  it("returns actionable validation for an unsupported sort", async () => {
-    const app = createApp({
-      catalogue: new InMemoryProductCatalogue(),
-      logger: silentLogger,
-    });
-    const response = await request(app)
-      .get("/api/products?sort=cheapest")
-      .expect(400);
+  it.each(["sort=cheapest", "sort=price-asc&sort=price-desc"])(
+    "returns actionable validation for %s",
+    async (query) => {
+      const app = createApp({
+        catalogue: new InMemoryProductCatalogue(),
+        logger: silentLogger,
+      });
+      const response = await request(app)
+        .get(`/api/products?${query}`)
+        .expect(400);
 
-    expect(response.body.error).toMatchObject({
-      code: "VALIDATION_ERROR",
-      fieldErrors: {
-        sort: expect.any(Array),
-      },
-    });
-  });
+      expect(response.body.error).toMatchObject({
+        code: "VALIDATION_ERROR",
+        fieldErrors: { sort: expect.any(Array) },
+      });
+    },
+  );
 
   it("rate-limits repeated application requests without blocking liveness", async () => {
     const app = createApp({
