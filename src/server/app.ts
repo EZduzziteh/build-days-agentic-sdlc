@@ -90,6 +90,7 @@ export const createApp = ({
         typeof request.query.category === "string"
           ? request.query.category
           : undefined,
+      sort: request.query.sort,
     });
     const items = await catalogue.list(query);
     response.json({

@@ -1,10 +1,12 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   fieldLimits,
   productCategories,
+  productSortOrders,
   type CartLine,
   type Product,
   type ProductCategory,
+  type ProductSortOrder,
 } from "../shared/contracts.js";
 import { getProduct, listProducts } from "./api.js";
 import {
@@ -35,11 +37,18 @@ interface CheckoutFields {
 
 const emptyCheckout: CheckoutFields = { name: "", email: "", address: "" };
 
+const sortLabels: Record<ProductSortOrder | "", string> = {
+  "": "Default",
+  "price-asc": "Price: low to high",
+  "price-desc": "Price: high to low",
+};
+
 export function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ProductCategory | "">("");
+  const [sort, setSort] = useState<ProductSortOrder | "">("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
   const [reload, setReload] = useState(0);
@@ -53,7 +62,6 @@ export function App() {
     Partial<Record<keyof CheckoutFields, string>>
   >({});
   const [confirmation, setConfirmation] = useState("");
-  const catalogueStatusId = useId();
 
   useEffect(() => {
     let active = true;
@@ -62,6 +70,7 @@ export function App() {
     void listProducts({
       q: query || undefined,
       category: category || undefined,
+      sort: sort || undefined,
     })
       .then((response) => {
         if (active) setProducts(response.items);
@@ -75,7 +84,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [query, category, reload]);
+  }, [query, category, sort, reload]);
 
   async function showDetails(product: Product) {
     setSelected(undefined);
@@ -156,10 +165,14 @@ export function App() {
               <p className="eyebrow">Browse the collection</p>
               <h2 id="catalogue-title">KosKo goods</h2>
             </div>
-            <span aria-live="polite">
-              {!loading && !loadError
-                ? `${products.length} ${products.length === 1 ? "product" : "products"}`
-                : ""}
+            <span aria-live="polite" aria-atomic="true">
+              {!loading && !loadError && (
+                <>
+                  <span>{products.length} {products.length === 1 ? "product" : "products"}</span>
+                  {" · "}
+                  <span>{`Order: ${sortLabels[sort]}`}</span>
+                </>
+              )}
             </span>
           </div>
 
@@ -200,9 +213,21 @@ export function App() {
                 ))}
               </select>
             </label>
+            <label>
+              Sort by
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as ProductSortOrder | "")}
+              >
+                <option value="">{sortLabels[""]}</option>
+                {productSortOrders.map((order) => (
+                  <option key={order} value={order}>{sortLabels[order]}</option>
+                ))}
+              </select>
+            </label>
           </form>
 
-          <div id={catalogueStatusId} aria-live="polite">
+          <div>
             {loading ? (
               <p className="state" role="status">Loading products…</p>
             ) : loadError ? (
@@ -223,6 +248,7 @@ export function App() {
                     setSearchInput("");
                     setQuery("");
                     setCategory("");
+                    setSort("");
                   }}
                 >
                   Clear filters
