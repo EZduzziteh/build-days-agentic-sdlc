@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/client/App.js";
 import type { Product, ProductListResponse } from "../src/shared/contracts.js";
@@ -57,23 +57,104 @@ describe("KosKo client", () => {
       ),
     );
 
+    const sort = screen.getByRole("combobox", { name: "Sort by" });
+    await user.tab();
+    expect(sort).toHaveFocus();
     await user.type(screen.getByLabelText("Search products"), "missing");
+    await user.selectOptions(sort, "price-asc");
+    expect(sort).toHaveFocus();
+    expect(await screen.findByText("Order: Price: low to high")).toBeVisible();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/products?category=outdoors&sort=price-asc",
+      expect.anything(),
+    );
+    const announcement = screen.getByText("Order: Price: low to high").parentElement;
+    expect(announcement).toHaveAttribute("aria-live", "polite");
+    expect(announcement).toHaveAttribute("aria-atomic", "true");
+    expect(announcement).toHaveTextContent("1 product · Order: Price: low to high");
+
+    await user.selectOptions(sort, "price-desc");
+    expect(await screen.findByText("Order: Price: high to low")).toBeVisible();
+    expect(announcement).toHaveTextContent("1 product · Order: Price: high to low");
+    expect(sort).toHaveFocus();
+
+    await user.selectOptions(screen.getByLabelText("Category"), "home");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/products?category=home&sort=price-desc",
+      expect.anything(),
+    );
     await user.click(screen.getByRole("button", { name: "Search" }));
     expect(await screen.findByRole("heading", { name: "No products found" })).toBeVisible();
+    expect(sort).toHaveValue("price-desc");
+    expect(announcement).toHaveTextContent("0 products · Order: Price: high to low");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/products?q=missing&category=home&sort=price-desc",
+      expect.anything(),
+    );
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByRole("heading", { name: product.name })).toBeVisible();
+    expect(sort).toHaveValue("");
+    expect(screen.getByLabelText("Search products")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/products", expect.anything());
   });
 
-  it("offers retry when the catalogue fails", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockRejectedValueOnce(new Error("Catalogue connection failed."))
-      .mockResolvedValueOnce(jsonResponse(listResponse([])));
+  it("retries a failed sort with the same search, category, and order", async () => {
+    const sortedUrl = "/api/products?q=lamp&category=outdoors&sort=price-desc";
+    let failed = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === sortedUrl && !failed) {
+        failed = true;
+        throw new Error("Catalogue connection failed.");
+      }
+      return jsonResponse(listResponse([product]));
+    });
     const user = userEvent.setup();
     render(<App />);
+    await screen.findByRole("heading", { name: product.name });
+    await user.type(screen.getByLabelText("Search products"), "lamp");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.selectOptions(screen.getByLabelText("Category"), "outdoors");
+    const sort = screen.getByRole("combobox", { name: "Sort by" });
+    await user.selectOptions(sort, "price-desc");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Catalogue connection failed.");
+    expect(sort).toHaveValue("price-desc");
+    expect(screen.getByLabelText("Search products")).toHaveValue("lamp");
+    expect(screen.getByLabelText("Category")).toHaveValue("outdoors");
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("heading", { name: "No products found" })).toBeVisible();
+    expect(await screen.findByText("Order: Price: high to low")).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([url]) => url === sortedUrl)).toHaveLength(2);
+  });
+
+  it.each(["success", "failure"])("ignores an older sort request's late %s", async (outcome) => {
+    let settleOldRequest!: (result: Response | Promise<Response>) => void;
+    const oldRequest = new Promise<Response>((resolve) => {
+      settleOldRequest = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("sort=price-asc")
+        ? oldRequest
+        : jsonResponse(listResponse([product])),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: product.name });
+    const sort = screen.getByRole("combobox", { name: "Sort by" });
+    await user.selectOptions(sort, "price-asc");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading products");
+    await user.selectOptions(sort, "price-desc");
+    expect(await screen.findByText("Order: Price: high to low")).toBeVisible();
+
+    await act(async () => {
+      settleOldRequest(
+        outcome === "success"
+          ? jsonResponse(listResponse([]))
+          : jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Late failure" } }, 500),
+      );
+    });
+    expect(screen.getByRole("heading", { name: product.name })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("loads details and manages cart quantities and totals", async () => {
