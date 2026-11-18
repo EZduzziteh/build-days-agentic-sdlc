@@ -5,12 +5,37 @@ import {
 } from "../src/shared/contracts.js";
 
 describe("commerce contracts", () => {
-  it("normalizes valid product queries", () => {
-    expect(productQuerySchema.parse({ q: "  lamp  ", category: "office" })).toEqual({
+  it("normalizes valid product queries without adding a sort field", () => {
+    expect(productQuerySchema.parse({})).toStrictEqual({ q: "" });
+    expect(productQuerySchema.parse({ q: "  lamp  ", category: "office" })).toStrictEqual({
       q: "lamp",
       category: "office",
     });
   });
+
+  it.each(["price-asc", "price-desc"])("accepts %s alongside search and category", (sort) => {
+    expect(productQuerySchema.parse({ q: "  lamp  ", category: "office", sort })).toEqual({
+      q: "lamp",
+      category: "office",
+      sort,
+    });
+  });
+
+  it.each([
+    { sort: "rating" },
+    { sort: "default" },
+    { sort: "" },
+    { sort: ["price-asc", "price-desc"] },
+  ])(
+    "rejects unsupported sort input $sort on the sort field",
+    ({ sort }) => {
+      const result = productQuerySchema.safeParse({ sort });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.path)).toEqual([["sort"]]);
+      }
+    },
+  );
 
   it("rejects unsupported categories and oversized search", () => {
     const result = productQuerySchema.safeParse({
