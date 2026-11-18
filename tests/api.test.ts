@@ -47,6 +47,72 @@ describe("product API", () => {
     });
   });
 
+  it("forwards sorting, echoes explicit values, and preserves the default order", async () => {
+    const app = createApp({
+      catalogue: new InMemoryProductCatalogue(),
+      logger: silentLogger,
+    });
+
+    const ascending = await request(app)
+      .get("/api/products?sort=price-asc")
+      .expect(200);
+    expect(ascending.body).toMatchObject({
+      query: { q: "", sort: "price-asc" },
+      items: [
+        { id: "harbor-catchall-tray" },
+        { id: "papertrail-notebook-set" },
+        { id: "nesting-prep-bowls" },
+        { id: "trailmark-bottle" },
+        { id: "aurora-desk-lamp" },
+        { id: "cloudrest-throw" },
+        { id: "tideline-picnic-blanket" },
+        { id: "emberline-kettle" },
+      ],
+    });
+
+    const descendingFiltered = await request(app)
+      .get("/api/products?q=a&category=outdoors&sort=price-desc")
+      .expect(200);
+    expect(descendingFiltered.body).toMatchObject({
+      total: 2,
+      query: { q: "a", category: "outdoors", sort: "price-desc" },
+      items: [
+        { id: "tideline-picnic-blanket" },
+        { id: "trailmark-bottle" },
+      ],
+    });
+
+    const defaultOrder = await request(app).get("/api/products").expect(200);
+    expect(defaultOrder.body.query).toEqual({ q: "" });
+    expect(defaultOrder.body.items.map((product: { id: string }) => product.id)).toEqual([
+      "aurora-desk-lamp",
+      "cloudrest-throw",
+      "trailmark-bottle",
+      "tideline-picnic-blanket",
+      "nesting-prep-bowls",
+      "emberline-kettle",
+      "papertrail-notebook-set",
+      "harbor-catchall-tray",
+    ]);
+  });
+
+  it("returns an empty sorted result for filters with no matches", async () => {
+    const app = createApp({
+      catalogue: new InMemoryProductCatalogue(),
+      logger: silentLogger,
+    });
+
+    const response = await request(app)
+      .get("/api/products?q=no%20matching%20product&sort=price-asc")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      total: 0,
+      query: { q: "no matching product", sort: "price-asc" },
+      items: [],
+    });
+  });
+
   it("returns product details and safe not-found responses", async () => {
     const app = createApp({
       catalogue: new InMemoryProductCatalogue(),
@@ -78,6 +144,23 @@ describe("product API", () => {
       code: "VALIDATION_ERROR",
       fieldErrors: {
         category: expect.any(Array),
+      },
+    });
+  });
+
+  it("returns actionable validation for an unsupported sort", async () => {
+    const app = createApp({
+      catalogue: new InMemoryProductCatalogue(),
+      logger: silentLogger,
+    });
+    const response = await request(app)
+      .get("/api/products?sort=cheapest")
+      .expect(400);
+
+    expect(response.body.error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: {
+        sort: expect.any(Array),
       },
     });
   });
